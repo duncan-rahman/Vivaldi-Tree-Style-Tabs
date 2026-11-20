@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Tree Style Tabs Auto-Installer",
+  "version": "1.0.0",
+  "description": "Re-installs the Vivaldi Tree Style Tabs mod after Vivaldi updates.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoTd7U4uRVgmtYQUdSuUFIeIDhyUHbH+cNjKQ8XY87GTXTMpzbN33fcaD3AyuYpdLNSbiwtmK+XgietZWS5Jv9ChO4ydKEW5OKM5Cgr68dMKVs4TEsA4yoJ6ZUg9dvD5Q68GzOqyrrSZcq2EgMFKCHWDiCiLw1jVJhWAOnltowGgIfivf/Bd7NPF5PIokiMvVZj3r2PD9csuzQhDFM+3Bm+vHlSpTvH54nFsaVF1BIfqGbOgrdXKEcXWcfT/kLWAFGbYWSRnxcqyiEe9sIIG2VnDimM3J90EV2IUJBqNJFpjeQNoTexa8dNjCMbDvIwlpFehNdIiKXfRjRk67LAqofwIDAQAB",
+  "permissions": ["nativeMessaging", "alarms", "notifications"],
+  "background": { "service_worker": "background.js" },
+  "icons": { "128": "icon-128.png" }
+}

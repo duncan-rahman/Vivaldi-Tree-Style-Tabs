@@ -9,6 +9,9 @@
     "install:macos": "bash install-macos.sh",
     "uninstall:macos": "bash uninstall-macos.sh",
     "patch:windows": "patch-windows.bat",
-    "uninstall:windows": "uninstall-windows.bat"
+    "uninstall:windows": "uninstall-windows.bat",
+    "install:local": "autoinstall\\host\\svb-installer.bat",
+    "autoinstall:register": "powershell -NoProfile -ExecutionPolicy Bypass -File autoinstall/register-windows.ps1",
+    "autoinstall:unregister": "powershell -NoProfile -ExecutionPolicy Bypass -File autoinstall/register-windows.ps1 -Uninstall"
   }
 }
