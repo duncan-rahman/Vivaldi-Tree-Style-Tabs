@@ -8,6 +8,7 @@ const { createTabsApi } = require('./adapters/tabs-api.js')
 const { createThemeAdapter } = require('./adapters/theme.js')
 const { createLayoutAdapter } = require('./adapters/layout.js')
 const { createSidebarRenderer } = require('./ui/render.js')
+const { createFullscreenPanelCloser } = require('./controllers/fullscreen-panel-closer.js')
 const { settingsStore } = require('./store/settings-store.js')
 
 const { createActivationTrace, installTraceDownload } = require('./diagnostics/activation-trace.js')
@@ -45,6 +46,23 @@ function createTabLookupCache() {
     cached = { visibleIds, visibleIdSet, treeItemsById }
     tabStateRef = tabState
     return cached
+  }
+}
+
+async function startFullscreenPanelCloser(api) {
+  const windowPrivate = typeof vivaldi !== 'undefined' && vivaldi.windowPrivate ? vivaldi.windowPrivate : null
+  if (!windowPrivate || !windowPrivate.onStateChanged || typeof api.getPanelActions !== 'function') return null
+  try {
+    const panelActions = api.getPanelActions()
+    if (!panelActions) {
+      console.warn('[svb] fullscreen panel closer disabled: Vivaldi panel actions not found')
+      return null
+    }
+    const windowId = await api.getCurrentWindowId()
+    return createFullscreenPanelCloser({ windowId, windowPrivate, panelActions })
+  } catch (error) {
+    console.warn('[svb] fullscreen panel closer failed to start', error)
+    return null
   }
 }
 
@@ -359,6 +377,8 @@ async function main() {
 
   theme.start()
   layout.start()
+  let fullscreenPanelCloser = null
+  startFullscreenPanelCloser(api).then(closer => { fullscreenPanelCloser = closer })
   window.__svbDispose = () => {
     entryEventController.abort()
     while (unsubscribers.length) {
@@ -371,6 +391,7 @@ async function main() {
     if (typeof layout.dispose === 'function') layout.dispose()
     if (typeof theme.dispose === 'function') theme.dispose()
     if (typeof store.dispose === 'function') store.dispose()
+    if (fullscreenPanelCloser) fullscreenPanelCloser.dispose()
   }
   await store.init()
 }

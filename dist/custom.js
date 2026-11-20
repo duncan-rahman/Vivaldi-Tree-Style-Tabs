@@ -8368,6 +8368,18 @@ function getVivaldiMainView() {
     return workspaceStore
   }
 
+  // Vivaldi's panel actions (setContentVisible etc.). Vivaldi's webpack runtime
+  // doesn't expose its module cache, so this is found by source keywords; the
+  // module is loaded at startup, so requiring it returns the existing instance.
+  function getPanelActions() {
+    return findModuleByExports(
+      m => typeof m.setContentVisible === 'function'
+        && typeof m.togglePanel === 'function'
+        && typeof m.showNextPanel === 'function',
+      { sourceKeywords: ['PANEL_SET_CONTENT_VISIBLE', 'setContentVisible'] }
+    )
+  }
+
   function normalizeWorkspace(workspace) {
     if (!workspace || typeof workspace !== 'object') return null
     const id = Number(workspace.id)
@@ -8380,6 +8392,8 @@ function getVivaldiMainView() {
   }
 
   return {
+    getPanelActions,
+
     async getWorkspaces() {
       // 1. Try Prefs (Guaranteed to be instantly updated by Vivaldi when workspaces change)
       const prefsApi = getPrefsApi()
@@ -9154,6 +9168,10 @@ function createTabsApi() {
 
     async notifyActiveWorkspace(windowId, workspaceId) {
       return vivaldiBridge.notifyActiveWorkspace(windowId, workspaceId)
+    },
+
+    getPanelActions() {
+      return vivaldiBridge.getPanelActions()
     },
 
     async getTabs(windowId) {
@@ -13828,6 +13846,63 @@ function createSidebarRenderer(options) {
 module.exports = { createSidebarRenderer, renderContextMenu }
 
     },
+    "controllers/fullscreen-panel-closer.js": function(require, module, exports) {
+// Vivaldi can open a panel by itself around fullscreen: entering fullscreen
+// fills an empty selectedPanel with the first panel, which then opens. Panels
+// never need to open by themselves, so close panel content after this window
+// leaves fullscreen. Nothing happens while the window is fullscreen.
+//
+// The exit is detected from vivaldi.windowPrivate.onStateChanged, the event
+// Vivaldi's own window-state handling uses (chrome.windows.onBoundsChanged and
+// fullscreenchange don't fire in the UI page for video fullscreen). Vivaldi may
+// open the panel before or shortly after the exit, so the close is repeated a
+// few times; closing an already closed panel is a no-op.
+
+const CLOSE_DELAYS_MS = [0, 250, 750, 1500]
+
+function createFullscreenPanelCloser({ windowId, windowPrivate, panelActions, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  let fullscreen = false
+  let disposed = false
+  const timers = new Set()
+
+  function closePanel() {
+    try {
+      panelActions.setContentVisible(windowId, false)
+    } catch (error) {
+      console.warn('[svb] failed to close panel after fullscreen', error)
+    }
+  }
+
+  function onStateChanged(changedWindowId, state) {
+    if (disposed || changedWindowId !== windowId) return
+    const nextFullscreen = state === 'fullscreen'
+    if (fullscreen && !nextFullscreen) {
+      for (const delay of CLOSE_DELAYS_MS) {
+        const timer = setTimer(() => {
+          timers.delete(timer)
+          if (!disposed) closePanel()
+        }, delay)
+        timers.add(timer)
+      }
+    }
+    fullscreen = nextFullscreen
+  }
+
+  windowPrivate.onStateChanged.addListener(onStateChanged)
+
+  return {
+    dispose() {
+      disposed = true
+      windowPrivate.onStateChanged.removeListener(onStateChanged)
+      for (const timer of timers) clearTimer(timer)
+      timers.clear()
+    },
+  }
+}
+
+module.exports = { createFullscreenPanelCloser, CLOSE_DELAYS_MS }
+
+    },
     "diagnostics/activation-trace.js": function(require, module, exports) {
 // Temporary, bounded diagnostics. Never retain titles, URLs or error messages.
 function createActivationTrace(raw, capacity = 2000) {
@@ -13958,6 +14033,7 @@ const { createTabsApi } = require('./adapters/tabs-api.js')
 const { createThemeAdapter } = require('./adapters/theme.js')
 const { createLayoutAdapter } = require('./adapters/layout.js')
 const { createSidebarRenderer } = require('./ui/render.js')
+const { createFullscreenPanelCloser } = require('./controllers/fullscreen-panel-closer.js')
 const { settingsStore } = require('./store/settings-store.js')
 
 const { createActivationTrace, installTraceDownload } = require('./diagnostics/activation-trace.js')
@@ -13995,6 +14071,23 @@ function createTabLookupCache() {
     cached = { visibleIds, visibleIdSet, treeItemsById }
     tabStateRef = tabState
     return cached
+  }
+}
+
+async function startFullscreenPanelCloser(api) {
+  const windowPrivate = typeof vivaldi !== 'undefined' && vivaldi.windowPrivate ? vivaldi.windowPrivate : null
+  if (!windowPrivate || !windowPrivate.onStateChanged || typeof api.getPanelActions !== 'function') return null
+  try {
+    const panelActions = api.getPanelActions()
+    if (!panelActions) {
+      console.warn('[svb] fullscreen panel closer disabled: Vivaldi panel actions not found')
+      return null
+    }
+    const windowId = await api.getCurrentWindowId()
+    return createFullscreenPanelCloser({ windowId, windowPrivate, panelActions })
+  } catch (error) {
+    console.warn('[svb] fullscreen panel closer failed to start', error)
+    return null
   }
 }
 
@@ -14309,6 +14402,8 @@ async function main() {
 
   theme.start()
   layout.start()
+  let fullscreenPanelCloser = null
+  startFullscreenPanelCloser(api).then(closer => { fullscreenPanelCloser = closer })
   window.__svbDispose = () => {
     entryEventController.abort()
     while (unsubscribers.length) {
@@ -14321,6 +14416,7 @@ async function main() {
     if (typeof layout.dispose === 'function') layout.dispose()
     if (typeof theme.dispose === 'function') theme.dispose()
     if (typeof store.dispose === 'function') store.dispose()
+    if (fullscreenPanelCloser) fullscreenPanelCloser.dispose()
   }
   await store.init()
 }

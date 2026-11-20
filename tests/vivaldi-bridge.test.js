@@ -247,4 +247,42 @@ describe('vivaldi-bridge - Webpack module discovery', () => {
     assert.equal(targetExecuted, true, 'Target module should be executed')
     assert.equal(unrelatedExecuted, false, 'Unrelated module must NOT be executed')
   })
+
+  it('finds panel actions without require.c, as in Vivaldi 8.3', () => {
+    const panelActions = {
+      setContentVisible: () => {},
+      togglePanel: () => {},
+      showNextPanel: () => {},
+    }
+    const required = []
+    const mockRequire = function (id) {
+      required.push(id)
+      return id === 501 ? { Z: panelActions } : {}
+    }
+    // Vivaldi's runtime exposes module factories (m) but no module cache (c).
+    mockRequire.m = {
+      500: function () { return 'case"PANEL_SET_CONTENT_VISIBLE":' },
+      501: function () { return 'setContentVisible(e,t){r.Z.dispatch({actionType:"PANEL_SET_CONTENT_VISIBLE"})}' },
+      502: function () { return 'Ai.Z.setContentVisible(this.winId,!1)' },
+    }
+
+    global.chrome = {
+      extension: {
+        getViews: () => [{
+          document: {},
+          location: { href: 'chrome-extension://mpognobbkildjkofajifpdfhcoklimli/main.html' },
+          webpackChunkgapp_browser_react: { push: ([, , callback]) => callback(mockRequire) },
+        }],
+      },
+    }
+
+    const bridge = createVivaldiBridge({
+      getPrefsApi: () => null,
+      setPref: () => {},
+      promisifyChromeApi: fn => fn(),
+    })
+
+    assert.equal(bridge.getPanelActions(), panelActions)
+    assert.deepEqual(required, [501], 'Only the module with both keywords is required')
+  })
 })

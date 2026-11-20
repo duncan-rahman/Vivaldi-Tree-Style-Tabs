@@ -235,6 +235,18 @@ function getVivaldiMainView() {
     return workspaceStore
   }
 
+  // Vivaldi's panel actions (setContentVisible etc.). Vivaldi's webpack runtime
+  // doesn't expose its module cache, so this is found by source keywords; the
+  // module is loaded at startup, so requiring it returns the existing instance.
+  function getPanelActions() {
+    return findModuleByExports(
+      m => typeof m.setContentVisible === 'function'
+        && typeof m.togglePanel === 'function'
+        && typeof m.showNextPanel === 'function',
+      { sourceKeywords: ['PANEL_SET_CONTENT_VISIBLE', 'setContentVisible'] }
+    )
+  }
+
   function normalizeWorkspace(workspace) {
     if (!workspace || typeof workspace !== 'object') return null
     const id = Number(workspace.id)
@@ -247,6 +259,8 @@ function getVivaldiMainView() {
   }
 
   return {
+    getPanelActions,
+
     async getWorkspaces() {
       // 1. Try Prefs (Guaranteed to be instantly updated by Vivaldi when workspaces change)
       const prefsApi = getPrefsApi()
