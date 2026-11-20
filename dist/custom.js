@@ -8368,6 +8368,33 @@ function getVivaldiMainView() {
     return workspaceStore
   }
 
+  // Window store, panel store and panel actions, used to work around Vivaldi
+  // opening the first web panel when fullscreen ends (see fullscreen-panel-guard.js).
+  function getNativePanelModules() {
+    const windowStore = findModuleByExports(
+      m => typeof m.isFullscreen === 'function'
+        && typeof m.isHTML5Fullscreen === 'function'
+        && typeof m.addListener === 'function'
+        && typeof m.removeListener === 'function',
+      { sourceKeywords: ['isHTML5Fullscreen'] }
+    )
+    const panelStore = findModuleByExports(
+      m => typeof m.getFirstAvailablePanel === 'function'
+        && typeof m.getIsContentVisible === 'function'
+        && typeof m.addListener === 'function'
+        && typeof m.removeListener === 'function',
+      { sourceKeywords: ['getFirstAvailablePanel'] }
+    )
+    const panelActions = findModuleByExports(
+      m => typeof m.setContentVisible === 'function'
+        && typeof m.togglePanel === 'function'
+        && typeof m.showNextPanel === 'function',
+      { sourceKeywords: ['PANEL_SET_CONTENT_VISIBLE'] }
+    )
+    if (!windowStore || !panelStore || !panelActions) return null
+    return { windowStore, panelStore, panelActions }
+  }
+
   function normalizeWorkspace(workspace) {
     if (!workspace || typeof workspace !== 'object') return null
     const id = Number(workspace.id)
@@ -8380,6 +8407,8 @@ function getVivaldiMainView() {
   }
 
   return {
+    getNativePanelModules,
+
     async getWorkspaces() {
       // 1. Try Prefs (Guaranteed to be instantly updated by Vivaldi when workspaces change)
       const prefsApi = getPrefsApi()
@@ -9154,6 +9183,10 @@ function createTabsApi() {
 
     async notifyActiveWorkspace(windowId, workspaceId) {
       return vivaldiBridge.notifyActiveWorkspace(windowId, workspaceId)
+    },
+
+    getNativePanelModules() {
+      return vivaldiBridge.getNativePanelModules()
     },
 
     async getTabs(windowId) {
@@ -13828,6 +13861,74 @@ function createSidebarRenderer(options) {
 module.exports = { createSidebarRenderer, renderContextMenu }
 
     },
+    "controllers/fullscreen-panel-guard.js": function(require, module, exports) {
+// Works around a Vivaldi bug: with the panel bar visible and no panel open,
+// leaving fullscreen (F11 or a fullscreen video) opens the first panel.
+//
+// In Vivaldi's panel store, entering fullscreen hides the bar and clears
+// selectedPanel; with "auto-hide UI in fullscreen" the same update then sets
+// selectedPanel to the first available panel. Leaving fullscreen shows the bar
+// again and opens selectedPanel, i.e. the first panel.
+//
+// The guard remembers whether a panel was open when fullscreen started and,
+// if none was (and none was opened during fullscreen), closes the panel that
+// Vivaldi opens on exit. The bar stays visible.
+//
+// Vivaldi's window and panel stores both react to the same fullscreen action,
+// in an order we can't rely on, so state is evaluated once per update, after
+// both have changed (a microtask after the store listeners run).
+
+function createFullscreenPanelGuard({ windowId, windowStore, panelStore, panelActions, defer = queueMicrotask }) {
+  let lastFullscreen = windowStore.isFullscreen(windowId)
+  let lastContentVisible = panelStore.getIsContentVisible(windowId)
+  let openBeforeFullscreen = lastContentVisible
+  let openedDuringFullscreen = false
+  let settleScheduled = false
+  let disposed = false
+
+  function settle() {
+    settleScheduled = false
+    if (disposed) return
+
+    const fullscreen = windowStore.isFullscreen(windowId)
+    const contentVisible = panelStore.getIsContentVisible(windowId)
+
+    if (fullscreen && !lastFullscreen) {
+      openBeforeFullscreen = lastContentVisible
+      openedDuringFullscreen = false
+    } else if (fullscreen && contentVisible) {
+      openedDuringFullscreen = true
+    } else if (!fullscreen && lastFullscreen) {
+      if (contentVisible && !openBeforeFullscreen && !openedDuringFullscreen) {
+        panelActions.setContentVisible(windowId, false)
+      }
+    }
+
+    lastFullscreen = fullscreen
+    lastContentVisible = contentVisible
+  }
+
+  function scheduleSettle() {
+    if (settleScheduled || disposed) return
+    settleScheduled = true
+    defer(settle)
+  }
+
+  windowStore.addListener(scheduleSettle)
+  panelStore.addListener(scheduleSettle)
+
+  return {
+    dispose() {
+      disposed = true
+      windowStore.removeListener(scheduleSettle)
+      panelStore.removeListener(scheduleSettle)
+    },
+  }
+}
+
+module.exports = { createFullscreenPanelGuard }
+
+    },
     "diagnostics/activation-trace.js": function(require, module, exports) {
 // Temporary, bounded diagnostics. Never retain titles, URLs or error messages.
 function createActivationTrace(raw, capacity = 2000) {
@@ -13958,6 +14059,7 @@ const { createTabsApi } = require('./adapters/tabs-api.js')
 const { createThemeAdapter } = require('./adapters/theme.js')
 const { createLayoutAdapter } = require('./adapters/layout.js')
 const { createSidebarRenderer } = require('./ui/render.js')
+const { createFullscreenPanelGuard } = require('./controllers/fullscreen-panel-guard.js')
 const { settingsStore } = require('./store/settings-store.js')
 
 const { createActivationTrace, installTraceDownload } = require('./diagnostics/activation-trace.js')
@@ -13995,6 +14097,22 @@ function createTabLookupCache() {
     cached = { visibleIds, visibleIdSet, treeItemsById }
     tabStateRef = tabState
     return cached
+  }
+}
+
+async function startFullscreenPanelGuard(api) {
+  if (typeof api.getNativePanelModules !== 'function') return null
+  try {
+    const modules = api.getNativePanelModules()
+    if (!modules) {
+      console.warn('[svb] fullscreen panel guard disabled: Vivaldi panel modules not found')
+      return null
+    }
+    const windowId = await api.getCurrentWindowId()
+    return createFullscreenPanelGuard({ windowId, ...modules })
+  } catch (error) {
+    console.warn('[svb] fullscreen panel guard failed to start', error)
+    return null
   }
 }
 
@@ -14309,6 +14427,8 @@ async function main() {
 
   theme.start()
   layout.start()
+  let fullscreenPanelGuard = null
+  startFullscreenPanelGuard(api).then(guard => { fullscreenPanelGuard = guard })
   window.__svbDispose = () => {
     entryEventController.abort()
     while (unsubscribers.length) {
@@ -14321,6 +14441,7 @@ async function main() {
     if (typeof layout.dispose === 'function') layout.dispose()
     if (typeof theme.dispose === 'function') theme.dispose()
     if (typeof store.dispose === 'function') store.dispose()
+    if (fullscreenPanelGuard) fullscreenPanelGuard.dispose()
   }
   await store.init()
 }
