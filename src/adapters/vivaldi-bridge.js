@@ -235,33 +235,6 @@ function getVivaldiMainView() {
     return workspaceStore
   }
 
-  // Window store, panel store and panel actions, used to work around Vivaldi
-  // opening the first web panel when fullscreen ends (see fullscreen-panel-guard.js).
-  function getNativePanelModules() {
-    const windowStore = findModuleByExports(
-      m => typeof m.isFullscreen === 'function'
-        && typeof m.isHTML5Fullscreen === 'function'
-        && typeof m.addListener === 'function'
-        && typeof m.removeListener === 'function',
-      { sourceKeywords: ['isHTML5Fullscreen'] }
-    )
-    const panelStore = findModuleByExports(
-      m => typeof m.getFirstAvailablePanel === 'function'
-        && typeof m.getIsContentVisible === 'function'
-        && typeof m.addListener === 'function'
-        && typeof m.removeListener === 'function',
-      { sourceKeywords: ['getFirstAvailablePanel'] }
-    )
-    const panelActions = findModuleByExports(
-      m => typeof m.setContentVisible === 'function'
-        && typeof m.togglePanel === 'function'
-        && typeof m.showNextPanel === 'function',
-      { sourceKeywords: ['PANEL_SET_CONTENT_VISIBLE'] }
-    )
-    if (!windowStore || !panelStore || !panelActions) return null
-    return { windowStore, panelStore, panelActions }
-  }
-
   function normalizeWorkspace(workspace) {
     if (!workspace || typeof workspace !== 'object') return null
     const id = Number(workspace.id)
@@ -274,8 +247,6 @@ function getVivaldiMainView() {
   }
 
   return {
-    getNativePanelModules,
-
     async getWorkspaces() {
       // 1. Try Prefs (Guaranteed to be instantly updated by Vivaldi when workspaces change)
       const prefsApi = getPrefsApi()

@@ -8,7 +8,6 @@ const { createTabsApi } = require('./adapters/tabs-api.js')
 const { createThemeAdapter } = require('./adapters/theme.js')
 const { createLayoutAdapter } = require('./adapters/layout.js')
 const { createSidebarRenderer } = require('./ui/render.js')
-const { createFullscreenPanelGuard } = require('./controllers/fullscreen-panel-guard.js')
 const { settingsStore } = require('./store/settings-store.js')
 
 const { createActivationTrace, installTraceDownload } = require('./diagnostics/activation-trace.js')
@@ -46,22 +45,6 @@ function createTabLookupCache() {
     cached = { visibleIds, visibleIdSet, treeItemsById }
     tabStateRef = tabState
     return cached
-  }
-}
-
-async function startFullscreenPanelGuard(api) {
-  if (typeof api.getNativePanelModules !== 'function') return null
-  try {
-    const modules = api.getNativePanelModules()
-    if (!modules) {
-      console.warn('[svb] fullscreen panel guard disabled: Vivaldi panel modules not found')
-      return null
-    }
-    const windowId = await api.getCurrentWindowId()
-    return createFullscreenPanelGuard({ windowId, ...modules })
-  } catch (error) {
-    console.warn('[svb] fullscreen panel guard failed to start', error)
-    return null
   }
 }
 
@@ -376,8 +359,6 @@ async function main() {
 
   theme.start()
   layout.start()
-  let fullscreenPanelGuard = null
-  startFullscreenPanelGuard(api).then(guard => { fullscreenPanelGuard = guard })
   window.__svbDispose = () => {
     entryEventController.abort()
     while (unsubscribers.length) {
@@ -390,7 +371,6 @@ async function main() {
     if (typeof layout.dispose === 'function') layout.dispose()
     if (typeof theme.dispose === 'function') theme.dispose()
     if (typeof store.dispose === 'function') store.dispose()
-    if (fullscreenPanelGuard) fullscreenPanelGuard.dispose()
   }
   await store.init()
 }

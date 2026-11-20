@@ -328,10 +328,6 @@ function createTabsApi() {
       return vivaldiBridge.notifyActiveWorkspace(windowId, workspaceId)
     },
 
-    getNativePanelModules() {
-      return vivaldiBridge.getNativePanelModules()
-    },
-
     async getTabs(windowId) {
       const tabs = await promisifyChromeApi(tabsApi.query, { windowId })
       return tabs.filter(tab => !isPanelTab(tab)).map(normalizeTab)
