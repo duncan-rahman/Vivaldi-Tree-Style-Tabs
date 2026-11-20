@@ -69,6 +69,19 @@ To cleanly remove the mod from Vivaldi:
   uninstall-windows.bat "D:\CustomPath\Vivaldi\Application"
   ```
 
+**Auto-Installer Extension (Alternative, no background process)**
+If you build from source and don't want `svb-updater.exe` running in the tray, a small companion extension can re-install your local build from inside Vivaldi:
+- The extension (`autoinstall/extension`) runs when Vivaldi starts and every 30 minutes while it is open. It asks a native messaging host (`autoinstall/host/svb-installer.ps1`) to copy `dist/custom.js` and `dist/svb-folder.html` into every Vivaldi version folder that is missing them or has an older copy, and to add the `<script>` tag to `window.html`.
+- Vivaldi downloads updates into a new version folder while it is running, so the periodic check patches the update before you restart. If you restart sooner, the extension patches it on the next start and shows a notification asking for one more restart.
+- The extension lives in your Vivaldi profile and the host registration under `HKCU\Software\Chromium` and `HKCU\Software\Google\Chrome` (the keys Vivaldi reads native messaging hosts from), so both survive Vivaldi updates.
+
+Setup (once):
+1. Build the mod: `npm run build`
+2. Register the host: `npm run autoinstall:register`
+3. In `vivaldi://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the `autoinstall/extension` folder.
+
+To install a fresh build immediately, run `npm run install:local` and restart Vivaldi. To remove the auto-installer, run `npm run autoinstall:unregister` and remove the extension. The host logs its runs to `%LocalAppData%\SvbTreeTabs\installer.log`.
+
 ### Linux (Arch-based)
 
 The project includes an automatic installer that sets up a Pacman Hook to keep the mod active after system updates.
