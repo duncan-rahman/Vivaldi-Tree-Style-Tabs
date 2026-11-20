@@ -46,6 +46,13 @@ function Get-VivaldiAppDir {
 
 function Get-DistDir {
   if ($env:SVB_DIST_DIR) { return $env:SVB_DIST_DIR }
+  # register-windows.ps1 copies this script out of the repo and records the
+  # repo's dist folder next to it; when run from the repo, use ..\..\dist.
+  $configPath = Join-Path $PSScriptRoot 'config.json'
+  if (Test-Path $configPath) {
+    $config = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json
+    if ($config.distDir) { return $config.distDir }
+  }
   return [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\dist'))
 }
 

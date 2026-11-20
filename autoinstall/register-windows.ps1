@@ -1,4 +1,8 @@
-# Registers the native messaging host that the auto-installer extension calls.
+# Sets up the auto-installer: copies the extension and native messaging host
+# out of the repo into %LocalAppData%\SvbTreeTabs (so switching git branches
+# can't remove them) and registers the host. The host installs from this
+# repo's dist folder.
+#
 # Vivaldi looks hosts up under the Chromium and Google Chrome registry keys (not
 # its own), so register under both. Vivaldi updates don't touch either key, and
 # allowed_origins limits the host to this extension.
@@ -18,8 +22,12 @@ $RegKeys = @(
 )
 # Earlier versions of this script registered here; Vivaldi never reads it.
 $LegacyRegKey = "HKCU:\Software\Vivaldi\NativeMessagingHosts\$HostName"
-$HostDir = Join-Path $PSScriptRoot 'host'
+
+$InstallRoot = Join-Path $env:LOCALAPPDATA 'SvbTreeTabs'
+$HostDir = Join-Path $InstallRoot 'host'
+$ExtensionDir = Join-Path $InstallRoot 'extension'
 $ManifestPath = Join-Path $HostDir "$HostName.json"
+$DistDir = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\dist'))
 
 if (Test-Path $LegacyRegKey) { Remove-Item $LegacyRegKey -Force }
 
@@ -27,10 +35,20 @@ if ($Uninstall) {
   foreach ($key in $RegKeys) {
     if (Test-Path $key) { Remove-Item $key -Force }
   }
-  if (Test-Path $ManifestPath) { Remove-Item $ManifestPath -Force }
-  Write-Host 'Removed the native messaging host. You can now remove the extension in vivaldi://extensions.'
+  foreach ($dir in @($HostDir, $ExtensionDir)) {
+    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+  }
+  Write-Host 'Removed the auto-installer. Also remove the extension in vivaldi://extensions.'
   exit 0
 }
+
+foreach ($dir in @($HostDir, $ExtensionDir)) {
+  if (-not (Test-Path $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
+}
+Copy-Item (Join-Path $PSScriptRoot 'host\svb-installer.ps1'), (Join-Path $PSScriptRoot 'host\svb-installer.bat') $HostDir -Force
+Copy-Item (Join-Path $PSScriptRoot 'extension\*') $ExtensionDir -Recurse -Force
+
+[IO.File]::WriteAllText((Join-Path $HostDir 'config.json'), ([ordered]@{ distDir = $DistDir } | ConvertTo-Json))
 
 $manifest = [ordered]@{
   name = $HostName
@@ -47,5 +65,5 @@ foreach ($key in $RegKeys) {
   Write-Host "Registered $key"
 }
 
-Write-Host "Host manifest: $ManifestPath"
-Write-Host "Next: load $(Join-Path $PSScriptRoot 'extension') as an unpacked extension in vivaldi://extensions."
+Write-Host "Installs builds from: $DistDir"
+Write-Host "Next: load $ExtensionDir as an unpacked extension in vivaldi://extensions."

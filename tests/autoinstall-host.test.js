@@ -12,11 +12,11 @@ const WINDOW_HTML = '<!DOCTYPE html><html><head></head><body><div id="app"></div
 
 // Runs the host the way Vivaldi does: cmd.exe launches the .bat with the
 // caller origin, and the request/response are length-prefixed JSON.
-function runHost(env, request = { action: 'install', reason: 'test' }) {
+function runHost(env, { bat = BAT, request = { action: 'install', reason: 'test' } } = {}) {
   const body = Buffer.from(JSON.stringify(request), 'utf8')
   const header = Buffer.alloc(4)
   header.writeUInt32LE(body.length)
-  const proc = spawnSync('cmd.exe', ['/d', '/c', BAT, ORIGIN, '--parent-window=0'], {
+  const proc = spawnSync('cmd.exe', ['/d', '/c', bat, ORIGIN, '--parent-window=0'], {
     input: Buffer.concat([header, body]),
     env: { ...process.env, ...env },
   })
@@ -108,6 +108,24 @@ describe('auto-installer native host', { skip: process.platform !== 'win32' && '
     assert.deepStrictEqual(result.patched, ['8.3.4191.45'])
     assert.strictEqual(result.restartNeeded, true)
     assert.strictEqual(fs.readFileSync(path.join(uiDir, 'custom.js'), 'utf8'), '// mod v2')
+  })
+
+  it('installs from the dist folder recorded in config.json when copied out of the repo', () => {
+    const uiDir = addVersion('8.3.4191.45', { patched: false })
+    const hostDir = path.join(root, 'SvbTreeTabs', 'host')
+    fs.mkdirSync(hostDir, { recursive: true })
+    for (const file of ['svb-installer.bat', 'svb-installer.ps1']) {
+      fs.copyFileSync(path.join(path.dirname(BAT), file), path.join(hostDir, file))
+    }
+    fs.writeFileSync(path.join(hostDir, 'config.json'), JSON.stringify({ distDir }))
+    const { SVB_DIST_DIR, ...envWithoutDist } = env
+    void SVB_DIST_DIR
+
+    const result = runHost(envWithoutDist, { bat: path.join(hostDir, 'svb-installer.bat') })
+
+    assert.strictEqual(result.ok, true)
+    assert.deepStrictEqual(result.patched, ['8.3.4191.45'])
+    assert.strictEqual(fs.readFileSync(path.join(uiDir, 'custom.js'), 'utf8'), '// mod v1')
   })
 
   it('reports an error when the build is missing', () => {
